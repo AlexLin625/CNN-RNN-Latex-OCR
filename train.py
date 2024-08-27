@@ -9,9 +9,12 @@ from torch.nn.utils.rnn import pack_padded_sequence
 from model.utils import *
 from model import metrics,dataloader,model
 from torch.utils.checkpoint import checkpoint as train_ck
+from torch.utils.data import DataLoader
 
-# device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-device = "cpu"
+from model.dataloader import MyDataset
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 
 model.device = device
@@ -19,7 +22,7 @@ model.device = device
 如果网络的输入数据维度或类型上变化不大，设置  torch.backends.cudnn.benchmark = true  可以增加运行效率；
 如果网络的输入数据在每次 iteration 都变化的话，会导致 cnDNN 每次都会去寻找一遍最优配置，这样反而会降低运行效率。
 '''
-cudnn.benchmark = True
+# cudnn.benchmark = True
 
 
 def main():
@@ -30,7 +33,14 @@ def main():
     global best_score, epochs_since_improvement, checkpoint, start_epoch, fine_tune_encoder, data_name, word_map
 
     # 字典文件
-    word_map = load_json(vocab_path)
+    # word_map = load_json(vocab_path)
+    with open(vocab_path) as f:
+        words = f.readlines()
+    words.append("<start>")
+    words.append("<end>")
+    # vocab = load_json(vocab_path)
+    word_map = {value: index + 1 for index, value in enumerate(words)}
+    word_map["<pad>"] = 0
 
     # Initialize / load checkpoint
     if checkpoint is None:
@@ -70,24 +80,34 @@ def main():
     criterion = nn.CrossEntropyLoss().to(device)
 
     # 自定义的数据集
-    train_loader = dataloader.formuladataset(train_set_path,batch_size = batch_size,ratio = 5)
-    val_loader = dataloader.formuladataset(val_set_path,batch_size = test_batch_size,ratio = 5)
+    train_dataset = MyDataset(dataset_dir, is_train=True)
+    eval_dataset = MyDataset(dataset_dir, is_train=False)
+
+    train_loader = DataLoader(
+        train_dataset, 
+        batch_size=batch_size,
+        # collate_fn=collate_fn,
+        num_workers=0
+    )
+    val_loader = DataLoader(
+        eval_dataset, 
+        batch_size=batch_size,
+        # collate_fn=collate_fn,
+        num_workers=0
+    )
 
     # #统计验证集的词频
     # words_freq = cal_word_freq(word_map,val_loader)
     # print(words_freq)
     p = 1#teacher forcing概率
     # Epochs
-    for epoch in range(start_epoch, epochs):
-        train_loader.shuffle()
-        val_loader.shuffle()
+    for epoch in tqdm(range(start_epoch, epochs)):
         #每2个epoch衰减一次teahcer forcing的概率
         if p > 0.05:
             if (epoch % 3 == 0 and epoch != 0):
                 p *= 0.75
         else:
             p = 0
-        print('start epoch:%u'%epoch,'p:%.2f'%p)
 
         # 如果迭代4次后没有改善,则对学习率进行衰减,如果迭代20次都没有改善则触发早停.直到最大迭代次数
         if epochs_since_improvement == 30:
@@ -147,89 +167,68 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer,decoder_o
     decoder.train()  # train mode (dropout and batchnorm is used)
     encoder.train()
 
-    batch_time = AverageMeter()  # forward prop. + back prop. time
-    losses = AverageMeter()  # loss (per word decoded)
-    top3accs = AverageMeter()  # top5 accuracy
-
-    start = time.time()
-
     # Batches
-    # for i, (imgs, caps, caplens) in tqdm(enumerate(train_loader)):
-    for i, (imgs, caps, caplens) in enumerate(train_loader):
-        # Move to GPU, if available
-        imgs = imgs.to(device)
-        caps = caps.to(device)
-        caplens = caplens.to(device)
+    with tqdm(enumerate(train_loader), total=len(train_loader)) as it:
+        for i, (imgs, caps, caplens) in it:
+            # Move to GPU, if available
+            imgs = imgs.to(device)
+            caps = caps.to(device)
+            caplens = caplens.to(device)
 
-        # Forward prop.
-        # try:
-        #     imgs = encoder(imgs)
-        #     scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
-        # except:
-        # imgs.requires_grad = True
-        # imgs = train_ck(encoder,imgs)
-        try:
-            imgs = encoder(imgs)
-        except:
-            imgs = train_ck(encoder,imgs)
-        scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, p=p)
+            # Forward prop.
+            # try:
+            #     imgs = encoder(imgs)
+            #     scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
+            # except:
+            # imgs.requires_grad = True
+            # imgs = train_ck(encoder,imgs)
+            try:
+                imgs = encoder(imgs)
+            except:
+                imgs = train_ck(encoder,imgs)
+            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, p=p)
 
-        # 由于加入开始符<start>以及停止符<end>,caption从第二位开始,知道结束符
-        targets = caps_sorted[:, 1:]
+            # 由于加入开始符<start>以及停止符<end>,caption从第二位开始,知道结束符
+            targets = caps_sorted[:, 1:]
 
-        # Remove timesteps that we didn't decode at, or are pads
-        # pack_padded_sequence is an easy trick to do this
-        # scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
-        # targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
-        scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
-        targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
+            # Remove timesteps that we didn't decode at, or are pads
+            # pack_padded_sequence is an easy trick to do this
+            # scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
+            # targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
+            scores = pack_padded_sequence(scores, max(decode_lengths).cpu(), batch_first=True).data
+            targets = pack_padded_sequence(targets, max(decode_lengths).cpu(), batch_first=True).data
 
-        # Calculate loss
-        scores = scores.to(device)
-        loss = criterion(scores, targets)
+            # Calculate loss
+            scores = scores.to(device)
+            loss = criterion(scores, targets)
 
-        # 加入 doubly stochastic attention 正则化
-        loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
+            # 加入 doubly stochastic attention 正则化
+            loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
 
-        # 反向传播
-        encoder_optimizer.zero_grad()
-        decoder_optimizer.zero_grad()
-        loss.backward()
+            # 反向传播
+            encoder_optimizer.zero_grad()
+            decoder_optimizer.zero_grad()
+            loss.backward()
 
-        # 梯度裁剪
-        if grad_clip is not None:
-            clip_gradient(decoder_optimizer, grad_clip)
+            # 梯度裁剪
+            if grad_clip is not None:
+                clip_gradient(decoder_optimizer, grad_clip)
+                # if encoder_optimizer is not None:
+                #     clip_gradient(encoder_optimizer, grad_clip)
+
+            # 更新权重
+            decoder_optimizer.step()
+            encoder_optimizer.step()
             # if encoder_optimizer is not None:
-            #     clip_gradient(encoder_optimizer, grad_clip)
+            #     encoder_optimizer.step()
 
-        # 更新权重
-        decoder_optimizer.step()
-        encoder_optimizer.step()
-        # if encoder_optimizer is not None:
-        #     encoder_optimizer.step()
-
-        # Keep track of metrics
-        top3 = accuracy(scores, targets, 3)
-        losses.update(loss.item(), sum(decode_lengths))
-        top3accs.update(top3, sum(decode_lengths))
-        batch_time.update(time.time() - start)
-
-        start = time.time()
-
-        # Print status
-        if i % print_freq == 0:
-            print('Epoch: [{0}][{1}/{2}]\t'
-                  'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f})\t'
-                  'Loss {loss.val:.4f} ({loss.avg:.4f})\t'
-                  'Top-3 Accuracy {top3.val:.3f} ({top3.avg:.3f})'.format(epoch, i, len(train_loader),
-                                                                          batch_time=batch_time,
-                                                                          loss=losses,
-                                                                          top3=top3accs))
-        # if i % save_freq == 0:
-        #     save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder,encoder_optimizer,
-        #                 decoder_optimizer, 0,0)
-        del imgs, scores, caps_sorted, decode_lengths, alphas, sort_ind, loss, targets
-        torch.cuda.empty_cache()
+            it.set_postfix(
+                Loss=f"{loss:.2e}",
+            )
+            
+            # if i % save_freq == 0:
+            #     save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder,encoder_optimizer,
+            #                 decoder_optimizer, 0,0)
 
 
 def validate(val_loader, encoder, decoder, criterion):
@@ -257,79 +256,75 @@ def validate(val_loader, encoder, decoder, criterion):
     # explicitly disable gradient calculation to avoid CUDA memory error
     with torch.no_grad():
         # Batches
-        # for i, (imgs, caps, caplens, allcaps) in enumerate(val_loader):
-        # for i, (imgs, caps, caplens) in tqdm(enumerate(val_loader)):
-        for i, (imgs, caps, caplens) in enumerate(val_loader):
+        with tqdm(enumerate(val_loader), leave=False, total=len(val_loader)) as it:
+            for i, (imgs, caps, caplens) in it:
 
-            # Move to device, if available
-            imgs = imgs.to(device)
-            caps = caps.to(device)
-            caplens = caplens.to(device)
+                # Move to device, if available
+                imgs = imgs.to(device)
+                caps = caps.to(device)
+                caplens = caplens.to(device)
 
-            # Forward prop.
-            if encoder is not None:
-                imgs = encoder(imgs)
-            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, p=0)
+                # Forward prop.
+                if encoder is not None:
+                    imgs = encoder(imgs)
+                scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, p=0)
 
-            # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
-            targets = caps_sorted[:, 1:]
+                # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
+                targets = caps_sorted[:, 1:]
 
-            # Remove timesteps that we didn't decode at, or are pads
-            # pack_padded_sequence is an easy trick to do this
-            scores_copy = scores.clone()
-            scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
-            targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
+                # Remove timesteps that we didn't decode at, or are pads
+                # pack_padded_sequence is an easy trick to do this
+                scores_copy = scores.clone()
+                scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
+                targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
 
-            # Calculate loss
-            loss = criterion(scores, targets)
+                # Calculate loss
+                loss = criterion(scores, targets)
 
-            # Add doubly stochastic attention regularization
-            loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
+                # Add doubly stochastic attention regularization
+                loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
 
-            # Keep track of metrics
-            losses.update(loss.item(), sum(decode_lengths))
-            top3 = accuracy(scores, targets, 3)
-            top3accs.update(top3, sum(decode_lengths))
-            batch_time.update(time.time() - start)
+                # Keep track of metrics
+                losses.update(loss.item(), sum(decode_lengths))
+                top3 = accuracy(scores, targets, 3)
+                top3accs.update(top3, sum(decode_lengths))
+                batch_time.update(time.time() - start)
 
-            start = time.time()
+                start = time.time()
 
-            if i % print_freq == 0:
-                print('Validation: [{0}/{1}],'
-                      'Batch Time {batch_time.val:.3f} ({batch_time.avg:.3f}),'
-                      'Loss {loss.val:.4f} ({loss.avg:.4f}),'
-                      'Top-3 Accuracy {top3.val:.3f} ({top3.avg:.3f}),'.format(i, len(val_loader), batch_time=batch_time,
-                                                                                loss=losses, top3=top3accs))
+                it.set_postfix(
+                    Loss=f"{loss:.2e}",
+                )
 
-            # Store references (true captions), and hypothesis (prediction) for each image
-            # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
-            # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
+                # Store references (true captions), and hypothesis (prediction) for each image
+                # If for n images, we have n hypotheses, and references a, b, c... for each image, we need -
+                # references = [[ref1a, ref1b, ref1c], [ref2a, ref2b], ...], hypotheses = [hyp1, hyp2, ...]
 
-            # References
-            # allcaps = allcaps[sort_ind]  # because images were sorted in the decoder
-            # for j in range(allcaps.shape[0]):
-            #     img_caps = allcaps[j].tolist()
-            #     img_captions = list(
-            #         map(lambda c: [w for w in c if w not in {word_map['<start>'], word_map['<pad>']}],
-            #             img_caps))  # remove <start> and pads
-            #     references.append(img_captions)
-            caplens = caplens[sort_ind]
-            caps = caps[sort_ind]
-            for i in range(len(caplens)):
-                references.append(caps[i][1:caplens[i]].tolist())
-            # Hypotheses
-            # 这里直接使用greedy模式进行评价,在推断中一般使用集束搜索模式
-            _, preds = torch.max(scores_copy, dim=2)
-            preds = preds.tolist()
-            temp_preds = list()
-            for j, p in enumerate(preds):
-                temp_preds.append(preds[j][:decode_lengths[j]])  # remove pads
-            preds = temp_preds
-            hypotheses.extend(preds)
+                # References
+                # allcaps = allcaps[sort_ind]  # because images were sorted in the decoder
+                # for j in range(allcaps.shape[0]):
+                #     img_caps = allcaps[j].tolist()
+                #     img_captions = list(
+                #         map(lambda c: [w for w in c if w not in {word_map['<start>'], word_map['<pad>']}],
+                #             img_caps))  # remove <start> and pads
+                #     references.append(img_captions)
+                caplens = caplens[sort_ind]
+                caps = caps[sort_ind]
+                for i in range(len(caplens)):
+                    references.append(caps[i][1:caplens[i]].tolist())
+                # Hypotheses
+                # 这里直接使用greedy模式进行评价,在推断中一般使用集束搜索模式
+                _, preds = torch.max(scores_copy, dim=2)
+                preds = preds.tolist()
+                temp_preds = list()
+                for j, p in enumerate(preds):
+                    temp_preds.append(preds[j][:decode_lengths[j]])  # remove pads
+                preds = temp_preds
+                hypotheses.extend(preds)
 
-            assert len(references) == len(hypotheses)
+                assert len(references) == len(hypotheses)
 
-        Score = metrics.evaluate(losses, top3accs, references, hypotheses)
+            Score = metrics.evaluate(losses, top3accs, references, hypotheses)
     return Score
 
 

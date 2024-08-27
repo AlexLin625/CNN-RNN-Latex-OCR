@@ -116,7 +116,8 @@ class Encoder(nn.Module):
                 signal = signal.unsqueeze(0)
             for _ in range(num_dims - 1 - dim):  # 1, 0
                 signal = signal.unsqueeze(-2)
-            x += signal  # [1, 14, 1, 512]; [1, 1, 14, 512]
+            # don't use +=, or the in-place calculation will raise error in backward
+            x = x + signal  # [1, 14, 1, 512]; [1, 1, 14, 512]
         return x
 
 class Attention(nn.Module):
@@ -231,8 +232,9 @@ class DecoderWithAttention(nn.Module):
         # Sort input data by decreasing lengths; why? apparent below
         caption_lengths, sort_ind = caption_lengths.sort(dim=0, descending=True)
         # print('sort_ind',sort_ind,'encoder_out',encoder_out.shape,'encoder_captions',encoded_captions.shape)
-        encoder_out = encoder_out[sort_ind]
-        encoded_captions = encoded_captions[sort_ind]
+        encoder_out = encoder_out[sort_ind][:, 0]
+        encoded_captions = encoded_captions[sort_ind][:, 0]
+        # encoded_captions = torch.stack([encoded_captions for _ in range(num_pixels)], dim=2)
 
         # Embedding
         embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
@@ -243,7 +245,7 @@ class DecoderWithAttention(nn.Module):
 
         # 我们一旦生成了<end>就已经完成了解码
         # 因此需要解码的长度实际是 lengths - 1
-        decode_lengths = (caption_lengths - 1).tolist()
+        decode_lengths = caption_lengths - 1
         # 新建两个张量用于存放 word predicion scores and alphas
         predictions = torch.zeros(batch_size, max(decode_lengths), vocab_size).to(device)
         alphas = torch.zeros(batch_size, max(decode_lengths), num_pixels).to(device)

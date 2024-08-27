@@ -1,13 +1,23 @@
+import os
+from pathlib import Path
+
 import torchvision
 import torch
 import json
 import cv2
 import numpy as np
+from scipy.ndimage import zoom
+
 from config import vocab_path,buckets
 from torch.utils.data import Dataset
 from model.utils import load_json
 
-vocab = load_json(vocab_path)
+with open(vocab_path) as f:
+    words = f.readlines()
+words.append("<start>")
+words.append("<end>")
+vocab = {value.strip(): index + 1 for index, value in enumerate(words)}
+vocab["<pad>"] = 0
 
 def get_new_size(old_size, buckets=buckets,ratio = 2):
     """Computes new size from buckets
@@ -56,6 +66,7 @@ def label_transform(text,start_type = '<start>',end_type = '<end>',pad_type = '<
     text = [start_type] + text + [end_type]
     # while len(text)<max_len:
     #     text += [pad_type]
+    # print(f"{vocab=}")
     text = [i for i in map(lambda x:vocab[x],text)]
     return text
     # return torch.LongTensor(text)
@@ -69,10 +80,86 @@ def img_transform(img,size,ratio = 1):
     to_tensor = torchvision.transforms.ToTensor()
     return to_tensor(new_im)
 
+class MyDataset(Dataset):
+    def __init__(
+        self, 
+        dataset_dir, 
+        img_transform=img_transform,
+        label_transform = label_transform,
+        ratio = 2,
+        is_train = True
+    ):
+        self.img_transform = img_transform # 传入图片预处理
+        self.label_transform = label_transform # 传入图片预处理
+        self.ratio = ratio#下采样率
+
+        # list all npy files under the directory
+        npy_files_list = []
+        for file_name in os.listdir(dataset_dir):
+            if file_name.endswith(".npy"):
+                npy_files_list.append(file_name)
+        split_dict = {
+            "train": (0, 0.9),
+            "eval": (0.9, 1),
+        }
+        split_tuple = split_dict["train"] if is_train else split_dict["eval"]
+        n_files = len(npy_files_list)
+        self.npy_files_list = npy_files_list[int(split_tuple[0] * n_files): int(split_tuple[1] * n_files)]
+        self.n_files = len(self.npy_files_list)
+        print(f"files {self.npy_files_list} are used as {'train' if is_train else 'eval'} set")
+
+        # determine the number of samples as delimiters; n files has n+1 delimiters
+        self.n_samples_list = [0]
+        if len(self.npy_files_list) == 0:
+            print(f"No .npy file found under the directory {Path(dataset_dir)}")
+            exit(1)
+        for file_name in self.npy_files_list:
+            temp_images_and_labels: list[dict] = np.load(Path(dataset_dir) / file_name, allow_pickle=True)
+            self.n_samples_list.append(self.n_samples_list[-1] + len(temp_images_and_labels))
+        del temp_images_and_labels
+
+        # record the current loaded file index in self.npy_file_list
+        self.current_file_idx = 0
+        # init with the first file
+        self.images_and_labels: list[dict] = np.load(Path(dataset_dir) / self.npy_files_list[0], allow_pickle=True)
+
+    def __getitem__(self, idx):
+        # WARNING: the codes assume shuffle=False
+
+        # whether to load next .npy file
+        if idx >= self.n_samples_list[self.current_file_idx + 1]:
+            self.images_and_labels = np.load(Path(self.dataset_dir) / self.npy_files_list[self.current_file_idx + 1], allow_pickle=True)
+            self.current_file_idx += 1
+        
+        idx_in_list = idx - self.n_samples_list[self.current_file_idx]
+        image = self.images_and_labels[idx_in_list]["image"]
+        if image.shape[-1] == 3:
+            # convert RGB to grayscale and normalize
+            # (w, h, c) -> (w, h)
+            image = (0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2]) / 255
+        # Perform downsampling using scipy's zoom function
+        image = zoom(image, 1 / self.ratio, order=1)  # order=1 corresponds to bilinear interpolation
+        # (w, h) -> (1, w, h)
+        image = torch.tensor(image).float().unsqueeze(0)
+        label: str = self.images_and_labels[idx_in_list]["label"]
+        label_list = self.label_transform(label)
+
+        # reset the counter and init between epochs
+        if idx == self.n_samples_list[-1] - 1:
+            self.current_file_idx = 0
+            self.images_and_labels = np.load(Path(self.dataset_dir) / self.npy_files_list[0], allow_pickle=True)
+
+        return image, torch.LongTensor(label_list), torch.tensor([len(label_list)])
+
+    def __len__(self):
+        return self.n_samples_list[-1]
+
 class formuladataset(object):
-    #公式数据集,负责读取图片和标签,同时自动对进行预处理
-    #：param json_path 包含图片文件名和标签的json文件
-    #：param pic_transform,label_transform分别是图片预处理和标签预处理(主要是padding)
+    '''
+    公式数据集,负责读取图片和标签,同时自动对进行预处理
+    ：param json_path 包含图片文件名和标签的json文件
+    ：param pic_transform,label_transform分别是图片预处理和标签预处理(主要是padding)
+    '''
     def __init__(self, data_json_path, img_transform=img_transform,label_transform = label_transform,ratio = 2,batch_size = 2):
         self.img_transform = img_transform # 传入图片预处理
         self.label_transform = label_transform # 传入图片预处理

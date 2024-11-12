@@ -2,7 +2,7 @@
 
 A Pytorch implementation of [LinXueyuanStdio/LaTeX_OCR_PRO](https://github.com/LinXueyuanStdio/LaTeX_OCR_PRO), forked from [qs956/Latex_OCR_Pytorch](https://github.com/qs956/Latex_OCR_Pytorch)
 
-It use CNN as the encoder, and RNN as the decoder
+It uses CNN as the encoder, and RNN as the decoder
 
 ## Training
 

@@ -212,7 +212,7 @@ class DecoderWithAttention(nn.Module):
         # return h, c
         return h
 
-    def forward(self, encoder_out, encoded_captions, caption_lengths,p = 1):
+    def forward(self, encoder_out, encoded_captions=torch.zeros(1, 16, device="cuda", dtype=torch.long), caption_lengths=torch.full((1, 1), 16, device="cuda"),p = 1):
         """
         Forward propagation.
         :param encoder_out: encoder的输出 (batch_size, enc_image_size, enc_image_size, encoder_dim)
@@ -247,8 +247,8 @@ class DecoderWithAttention(nn.Module):
         # 因此需要解码的长度实际是 lengths - 1
         decode_lengths = caption_lengths - 1
         # 新建两个张量用于存放 word predicion scores and alphas
-        predictions = torch.zeros(batch_size, max(decode_lengths), vocab_size).to(device)
-        alphas = torch.zeros(batch_size, max(decode_lengths), num_pixels).to(device)
+        predictions = torch.zeros(batch_size, int(max(decode_lengths)), vocab_size).to(device)
+        alphas = torch.zeros(batch_size, int(max(decode_lengths)), num_pixels).to(device)
 
         # 在每一个时间步根据解码器的前一个状态以及经过attention加权后的encoder输出进行解码
         for t in range(max(decode_lengths)):

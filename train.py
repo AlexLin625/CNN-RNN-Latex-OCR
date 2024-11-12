@@ -76,6 +76,10 @@ def main():
     decoder = decoder.to(device)
     encoder = encoder.to(device)
 
+    # test_params_flop(encoder, (1, 64, 64))
+    # test_params_flop(decoder, (512, 32, 32))
+    # exit(1)
+
     # 使用交叉熵损失函数
     criterion = nn.CrossEntropyLoss().to(device)
 
@@ -175,13 +179,6 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer,decoder_o
             caps = caps.to(device)
             caplens = caplens.to(device)
 
-            # Forward prop.
-            # try:
-            #     imgs = encoder(imgs)
-            #     scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens)
-            # except:
-            # imgs.requires_grad = True
-            # imgs = train_ck(encoder,imgs)
             try:
                 imgs = encoder(imgs)
             except:

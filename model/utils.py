@@ -4,6 +4,16 @@ import json
 import cv2
 import torch
 
+def test_params_flop(model,x_shape):
+    """
+    If you want to thest former's flop, you need to give default value to inputs in model.forward(), the following code can only pass one argument to forward()
+    """
+    from ptflops import get_model_complexity_info
+    with torch.cuda.device(0):
+        macs, params = get_model_complexity_info(model.cuda(), x_shape, as_strings=True, print_per_layer_stat=False)
+        print('{:<30}  {:<8}'.format('Computational complexity: ', macs))
+        print('{:<30}  {:<8}'.format('Number of parameters: ', params))
+
 def collate_fn(batch_images):
     max_width, max_height, max_length = 0, 0, 0
     batch, channel = len(batch_images), batch_images[0][0].shape[0]

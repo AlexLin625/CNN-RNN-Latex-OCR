@@ -89,6 +89,7 @@ class MyDataset(Dataset):
         ratio = 2,
         is_train = True
     ):
+        self.dataset_dir = dataset_dir
         self.img_transform = img_transform # 传入图片预处理
         self.label_transform = label_transform # 传入图片预处理
         self.ratio = ratio#下采样率
@@ -100,13 +101,13 @@ class MyDataset(Dataset):
                 npy_files_list.append(file_name)
         split_dict = {
             "train": (0, 0.9),
-            "eval": (0.9, 1),
+            "val": (0.9, 1),
         }
-        split_tuple = split_dict["train"] if is_train else split_dict["eval"]
+        split_tuple = split_dict["train"] if is_train else split_dict["val"]
         n_files = len(npy_files_list)
         self.npy_files_list = npy_files_list[int(split_tuple[0] * n_files): int(split_tuple[1] * n_files)]
         self.n_files = len(self.npy_files_list)
-        print(f"files {self.npy_files_list} are used as {'train' if is_train else 'eval'} set")
+        print(f"files {self.npy_files_list} are used as {'train' if is_train else 'val'} set")
 
         # determine the number of samples as delimiters; n files has n+1 delimiters
         self.n_samples_list = [0]

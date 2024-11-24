@@ -38,6 +38,36 @@ def collate_fn(batch_images):
         labels_masks[i][:l] = 1
     return images, labels, batch_images
 
+def collate_fn_MyDataset(
+    batch: list[tuple]
+):
+    max_width, max_height, max_length = 0, 0, 0
+    BATCH_SIZE, CHANNEL = len(batch), 1
+    proper_items = []
+    for sample in batch: # iterate over each samples
+        image, label, label_len = sample
+        if image.shape[0] * max_width > 1600 * 320 or image.shape[1] * max_height > 1600 * 320:
+            continue
+        max_height = max(max_height, image.shape[0])
+        max_width = max(max_width, image.shape[1])
+        max_length = max(max_length, label_len)
+        proper_items.append(sample)
+
+    images, image_masks = torch.zeros((len(proper_items), CHANNEL, max_height, max_width)), torch.zeros((len(proper_items), 1, max_height, max_width))
+    labels, labels_masks = torch.zeros((len(proper_items), max_length)).long(), torch.zeros((len(proper_items), max_length))
+    label_lens = torch.empty((len(proper_items)))
+
+    for i, sample in enumerate(proper_items):
+        image, label, label_len = sample
+        h, w = image.shape
+        images[i][:, :h, :w] = image
+        image_masks[i][:, :h, :w] = 1
+        l = label_len
+        labels[i][:l] = label
+        labels_masks[i][:l] = 1
+        label_lens[i] = label_len
+    return images, labels, label_lens
+
 def load_json(path):
     with open(path,'r')as f:
         data = json.load(f)

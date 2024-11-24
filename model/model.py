@@ -232,8 +232,8 @@ class DecoderWithAttention(nn.Module):
         # Sort input data by decreasing lengths; why? apparent below
         caption_lengths, sort_ind = caption_lengths.sort(dim=0, descending=True)
         # print('sort_ind',sort_ind,'encoder_out',encoder_out.shape,'encoder_captions',encoded_captions.shape)
-        encoder_out = encoder_out[sort_ind][:, 0]
-        encoded_captions = encoded_captions[sort_ind][:, 0]
+        encoder_out = encoder_out[sort_ind]
+        encoded_captions = encoded_captions[sort_ind]
         # encoded_captions = torch.stack([encoded_captions for _ in range(num_pixels)], dim=2)
 
         # Embedding
@@ -251,7 +251,7 @@ class DecoderWithAttention(nn.Module):
         alphas = torch.zeros(batch_size, int(max(decode_lengths)), num_pixels).to(device)
 
         # 在每一个时间步根据解码器的前一个状态以及经过attention加权后的encoder输出进行解码
-        for t in range(max(decode_lengths)):
+        for t in range(int(max(decode_lengths))):
             #decode_lengths是解码长度降序的排列,batch_size_t求出当前时间步中需要进行解码的数量
             batch_size_t = sum([l > t for l in decode_lengths])
             attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],

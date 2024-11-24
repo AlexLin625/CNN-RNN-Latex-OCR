@@ -90,13 +90,13 @@ def main():
     train_loader = DataLoader(
         train_dataset, 
         batch_size=batch_size,
-        # collate_fn=collate_fn,
+        collate_fn=collate_fn_MyDataset,
         num_workers=0
     )
     val_loader = DataLoader(
         eval_dataset, 
         batch_size=batch_size,
-        # collate_fn=collate_fn,
+        collate_fn=collate_fn_MyDataset,
         num_workers=0
     )
 
@@ -192,8 +192,8 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer,decoder_o
             # pack_padded_sequence is an easy trick to do this
             # scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
             # targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
-            scores = pack_padded_sequence(scores, max(decode_lengths).cpu(), batch_first=True).data
-            targets = pack_padded_sequence(targets, max(decode_lengths).cpu(), batch_first=True).data
+            scores = pack_padded_sequence(scores, decode_lengths.cpu().int(), batch_first=True).data
+            targets = pack_padded_sequence(targets, decode_lengths.cpu().int(), batch_first=True).data
 
             # Calculate loss
             scores = scores.to(device)

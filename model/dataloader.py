@@ -140,8 +140,7 @@ class MyDataset(Dataset):
             image = (0.299 * image[:, :, 0] + 0.587 * image[:, :, 1] + 0.114 * image[:, :, 2]) / 255
         # Perform downsampling using scipy's zoom function
         image = zoom(image, 1 / self.ratio, order=1)  # order=1 corresponds to bilinear interpolation
-        # (w, h) -> (1, w, h)
-        image = torch.tensor(image).float().unsqueeze(0)
+        image = torch.tensor(image).float()
         label: str = self.images_and_labels[idx_in_list]["label"]
         label_list = self.label_transform(label)
 

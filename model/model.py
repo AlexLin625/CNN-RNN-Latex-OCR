@@ -212,7 +212,7 @@ class DecoderWithAttention(nn.Module):
         # return h, c
         return h
 
-    def forward(self, encoder_out, encoded_captions=torch.zeros(1, 16, device="cuda", dtype=torch.long), caption_lengths=torch.full((1, 1), 16, device="cuda"),p = 1):
+    def forward(self, encoder_out, encoded_captions=torch.zeros(1, 16, device="cuda", dtype=torch.long), caption_lengths=torch.tensor([16], device="cuda"),p = 1):
         """
         Forward propagation.
         :param encoder_out: encoder的输出 (batch_size, enc_image_size, enc_image_size, encoder_dim)

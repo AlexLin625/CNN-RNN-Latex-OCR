@@ -3,65 +3,69 @@ import torch
 import math
 from torch import nn
 import torch.nn.functional as F
+
 # device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 device = "cpu"
 
+
 class Encoder(nn.Module):
     def __init__(self):
-        super(Encoder,self).__init__()
-        self.conv1 = nn.Conv2d(1,64,3,stride=1,padding=1)
-        self.maxpool1 = nn.MaxPool2d(2,stride=1,padding=1)
-        
-        self.conv2 = nn.Conv2d(64,128,3,stride=1,padding=1)
-        self.maxpool2 = nn.MaxPool2d(2,stride=1,padding=1)
-        
-        self.conv3 = nn.Conv2d(128,256,3,stride=1,padding=1)
-        
-        self.conv4 = nn.Conv2d(256,256,3,stride=1,padding=1)
-        self.maxpool3 = nn.MaxPool2d((2,1),stride=(2,1),padding=(1,0))
-        
-        self.conv5 = nn.Conv2d(256,512,3,stride=1,padding=1)
-        self.maxpool4 = nn.MaxPool2d((1,2),stride=(1,2),padding=(0,1))
-        
-        self.conv6 = nn.Conv2d(512,512,3)
-    def forward(self,x):
-        #layer1
+        super(Encoder, self).__init__()
+        self.conv1 = nn.Conv2d(1, 64, 3, stride=1, padding=1)
+        self.maxpool1 = nn.MaxPool2d(2, stride=1, padding=1)
+
+        self.conv2 = nn.Conv2d(64, 128, 3, stride=1, padding=1)
+        self.maxpool2 = nn.MaxPool2d(2, stride=1, padding=1)
+
+        self.conv3 = nn.Conv2d(128, 256, 3, stride=1, padding=1)
+
+        self.conv4 = nn.Conv2d(256, 256, 3, stride=1, padding=1)
+        self.maxpool3 = nn.MaxPool2d((2, 1), stride=(2, 1), padding=(1, 0))
+
+        self.conv5 = nn.Conv2d(256, 512, 3, stride=1, padding=1)
+        self.maxpool4 = nn.MaxPool2d((1, 2), stride=(1, 2), padding=(0, 1))
+
+        self.conv6 = nn.Conv2d(512, 512, 3)
+
+    def forward(self, x):
+        # layer1
         x = self.conv1(x)
         x = self.maxpool1(x)
         x = F.relu(x)
-        
-        #layer2
+
+        # layer2
         x = self.conv2(x)
         x = self.maxpool2(x)
         x = F.relu(x)
-        
-        #layer3
+
+        # layer3
         x = self.conv3(x)
         x = F.relu(x)
-        
-        #layer4
+
+        # layer4
         x = self.conv4(x)
         x = self.maxpool3(x)
         x = F.relu(x)
-        
-        #layer5
+
+        # layer5
         x = self.conv5(x)
         x = self.maxpool4(x)
         x = F.relu(x)
-        
-        #layer6
+
+        # layer6
         x = self.conv6(x)
         x = F.relu(x)
 
-        #位置嵌入
-        x = x.permute(0,2,3,1)
+        # 位置嵌入
+        x = x.permute(0, 2, 3, 1)
         x = self.add_timing_signal_nd(x)
-        x = x.permute(0,3,1,2)
+        x = x.permute(0, 3, 1, 2)
 
         x = x.contiguous()
         return x
-#修改自:
-# https://github.com/tensorflow/tensor2tensor/blob/37465a1759e278e8f073cd04cd9b4fe377d3c740/tensor2tensor/layers/common_attention.py
+
+    # 修改自:
+    # https://github.com/tensorflow/tensor2tensor/blob/37465a1759e278e8f073cd04cd9b4fe377d3c740/tensor2tensor/layers/common_attention.py
     def add_timing_signal_nd(self, x, min_timescale=1.0, max_timescale=1.0e4):
         """Adds a bunch of sinusoids of different frequencies to a Tensor.
 
@@ -94,24 +98,34 @@ class Encoder(nn.Module):
             a Tensor the same shape as x.
 
         """
-        static_shape = list(x.shape) # [2, 512, 50, 120]
+        static_shape = list(x.shape)  # [2, 512, 50, 120]
         num_dims = len(static_shape) - 2  # 2
-        channels = x.shape[-1]  # 512 
+        channels = x.shape[-1]  # 512
         num_timescales = channels // (num_dims * 2)  # 512 // (2*2) = 128
-        log_timescale_increment = (
-            math.log(float(max_timescale) / float(min_timescale)) /
-            (float(num_timescales) - 1))
+        log_timescale_increment = math.log(
+            float(max_timescale) / float(min_timescale)
+        ) / (float(num_timescales) - 1)
         inv_timescales = min_timescale * torch.exp(
-            torch.FloatTensor([i for i in range(num_timescales)]) * -log_timescale_increment)  # len == 128
+            torch.FloatTensor([i for i in range(num_timescales)])
+            * -log_timescale_increment
+        )  # len == 128
         for dim in range(num_dims):  # dim == 0; 1
             length = x.shape[dim + 1]  # 要跳过前两个维度
             position = torch.arange(length).float()  # len == 50
-            scaled_time = torch.reshape(position,(-1,1)) * torch.reshape(inv_timescales,(1,-1))
-            #[50,1] x [1,128] = [50,128]
-            signal = torch.cat([torch.sin(scaled_time), torch.cos(scaled_time)], axis=1).to(device)  # [50, 256]
+            scaled_time = torch.reshape(position, (-1, 1)) * torch.reshape(
+                inv_timescales, (1, -1)
+            )
+            # [50,1] x [1,128] = [50,128]
+            signal = torch.cat(
+                [torch.sin(scaled_time), torch.cos(scaled_time)], axis=1
+            ).to(
+                device
+            )  # [50, 256]
             prepad = dim * 2 * num_timescales  # 0; 256
-            postpad = channels - (dim + 1) * 2 * num_timescales  # 512-(1;2)*2*128 = 256; 0
-            signal = F.pad(signal, (prepad,postpad,0,0))  # [50, 512]
+            postpad = (
+                channels - (dim + 1) * 2 * num_timescales
+            )  # 512-(1;2)*2*128 = 256; 0
+            signal = F.pad(signal, (prepad, postpad, 0, 0))  # [50, 512]
             for _ in range(1 + dim):  # 1; 2
                 signal = signal.unsqueeze(0)
             for _ in range(num_dims - 1 - dim):  # 1, 0
@@ -119,6 +133,7 @@ class Encoder(nn.Module):
             # don't use +=, or the in-place calculation will raise error in backward
             x = x + signal  # [1, 14, 1, 512]; [1, 1, 14, 512]
         return x
+
 
 class Attention(nn.Module):
     """
@@ -132,9 +147,15 @@ class Attention(nn.Module):
         :param attention_dim: size of the attention network
         """
         super(Attention, self).__init__()
-        self.encoder_att = nn.Linear(encoder_dim, attention_dim)  # linear layer to transform encoded image
-        self.decoder_att = nn.Linear(decoder_dim, attention_dim)  # linear layer to transform decoder's output
-        self.full_att = nn.Linear(attention_dim, 1)  # linear layer to calculate values to be softmax-ed
+        self.encoder_att = nn.Linear(
+            encoder_dim, attention_dim
+        )  # linear layer to transform encoded image
+        self.decoder_att = nn.Linear(
+            decoder_dim, attention_dim
+        )  # linear layer to transform decoder's output
+        self.full_att = nn.Linear(
+            attention_dim, 1
+        )  # linear layer to calculate values to be softmax-ed
         self.relu = nn.ReLU()
         self.softmax = nn.Softmax(dim=1)  # softmax layer to calculate weights
 
@@ -147,9 +168,13 @@ class Attention(nn.Module):
         """
         att1 = self.encoder_att(encoder_out)  # (batch_size, num_pixels, attention_dim)
         att2 = self.decoder_att(decoder_hidden)  # (batch_size, attention_dim)
-        att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(2)  # (batch_size, num_pixels)
+        att = self.full_att(self.relu(att1 + att2.unsqueeze(1))).squeeze(
+            2
+        )  # (batch_size, num_pixels)
         alpha = self.softmax(att)  # (batch_size, num_pixels)
-        attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(dim=1)  # (batch_size, encoder_dim)
+        attention_weighted_encoding = (encoder_out * alpha.unsqueeze(2)).sum(
+            dim=1
+        )  # (batch_size, encoder_dim)
 
         return attention_weighted_encoding, alpha
 
@@ -159,7 +184,16 @@ class DecoderWithAttention(nn.Module):
     Decoder.
     """
 
-    def __init__(self, attention_dim, embed_dim, decoder_dim, vocab_size, encoder_dim=512, dropout=0.5, p=0):
+    def __init__(
+        self,
+        attention_dim,
+        embed_dim,
+        decoder_dim,
+        vocab_size,
+        encoder_dim=512,
+        dropout=0.5,
+        p=0,
+    ):
         """
         :param attention_dim: size of attention network
         :param embed_dim: embedding size
@@ -177,19 +211,31 @@ class DecoderWithAttention(nn.Module):
         self.vocab_size = vocab_size
         self.dropout = dropout
 
-        self.attention = Attention(encoder_dim, decoder_dim, attention_dim).to(device)  # attention network
+        self.attention = Attention(encoder_dim, decoder_dim, attention_dim).to(
+            device
+        )  # attention network
 
         self.embedding = nn.Embedding(vocab_size, embed_dim)  # embedding layer
         self.dropout = nn.Dropout(p=self.dropout)
         # self.decode_step = nn.LSTMCell(embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding LSTMCell
-        self.decode_step = nn.GRUCell(embed_dim + encoder_dim, decoder_dim, bias=True)  # decoding LSTMCell
-        self.init_h = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial hidden state of LSTMCell
-        self.init_c = nn.Linear(encoder_dim, decoder_dim)  # linear layer to find initial cell state of LSTMCell
-        self.f_beta = nn.Linear(decoder_dim, encoder_dim)  # linear layer to create a sigmoid-activated gate
+        self.decode_step = nn.GRUCell(
+            embed_dim + encoder_dim, decoder_dim, bias=True
+        )  # decoding LSTMCell
+        self.init_h = nn.Linear(
+            encoder_dim, decoder_dim
+        )  # linear layer to find initial hidden state of LSTMCell
+        self.init_c = nn.Linear(
+            encoder_dim, decoder_dim
+        )  # linear layer to find initial cell state of LSTMCell
+        self.f_beta = nn.Linear(
+            decoder_dim, encoder_dim
+        )  # linear layer to create a sigmoid-activated gate
         self.sigmoid = nn.Sigmoid()
-        self.fc = nn.Linear(decoder_dim, vocab_size)  # linear layer to find scores over vocabulary
+        self.fc = nn.Linear(
+            decoder_dim, vocab_size
+        )  # linear layer to find scores over vocabulary
         self.init_weights()  # initialize some layers with the uniform distribution
-        self.p = p #teacher forcing概率
+        self.p = p  # teacher forcing概率
 
     def init_weights(self):
         """
@@ -198,7 +244,7 @@ class DecoderWithAttention(nn.Module):
         self.embedding.weight.data.uniform_(-0.1, 0.1)
         self.fc.bias.data.fill_(0)
         self.fc.weight.data.uniform_(-0.1, 0.1)
-        self.embedding.weight.data.uniform_(-0.1,0.1)
+        self.embedding.weight.data.uniform_(-0.1, 0.1)
 
     def init_hidden_state(self, encoder_out):
         """
@@ -212,7 +258,13 @@ class DecoderWithAttention(nn.Module):
         # return h, c
         return h
 
-    def forward(self, encoder_out, encoded_captions=torch.zeros(1, 16, device="cuda", dtype=torch.long), caption_lengths=torch.tensor([16], device="cuda"),p = 1):
+    def forward(
+        self,
+        encoder_out,
+        encoded_captions=torch.zeros(1, 16, device="cuda", dtype=torch.long),
+        caption_lengths=torch.tensor([16], device="cuda"),
+        p=1,
+    ):
         """
         Forward propagation.
         :param encoder_out: encoder的输出 (batch_size, enc_image_size, enc_image_size, encoder_dim)
@@ -222,11 +274,15 @@ class DecoderWithAttention(nn.Module):
         """
         self.p = p
         batch_size = encoder_out.size(0)
-        encoder_dim = encoder_out.size(1)#这里和普通的resnet输出的不同，resnet是最后一个维度是C
+        encoder_dim = encoder_out.size(
+            1
+        )  # 这里和普通的resnet输出的不同，resnet是最后一个维度是C
         vocab_size = self.vocab_size
 
         # 把特征图展平作为上下文向量
-        encoder_out = encoder_out.view(batch_size, -1, encoder_dim)  # (batch_size, num_pixels, encoder_dim)
+        encoder_out = encoder_out.view(
+            batch_size, -1, encoder_dim
+        )  # (batch_size, num_pixels, encoder_dim)
         num_pixels = encoder_out.size(1)
 
         # Sort input data by decreasing lengths; why? apparent below
@@ -237,7 +293,9 @@ class DecoderWithAttention(nn.Module):
         # encoded_captions = torch.stack([encoded_captions for _ in range(num_pixels)], dim=2)
 
         # Embedding
-        embeddings = self.embedding(encoded_captions)  # (batch_size, max_caption_length, embed_dim)
+        embeddings = self.embedding(
+            encoded_captions
+        )  # (batch_size, max_caption_length, embed_dim)
 
         # 初始化GRU状态
         # h, c = self.init_hidden_state(encoder_out)  # (batch_size, decoder_dim)
@@ -247,29 +305,49 @@ class DecoderWithAttention(nn.Module):
         # 因此需要解码的长度实际是 lengths - 1
         decode_lengths = caption_lengths - 1
         # 新建两个张量用于存放 word predicion scores and alphas
-        predictions = torch.zeros(batch_size, int(max(decode_lengths)), vocab_size).to(device)
-        alphas = torch.zeros(batch_size, int(max(decode_lengths)), num_pixels).to(device)
+        predictions = torch.zeros(batch_size, int(max(decode_lengths)), vocab_size).to(
+            device
+        )
+        alphas = torch.zeros(batch_size, int(max(decode_lengths)), num_pixels).to(
+            device
+        )
 
         # 在每一个时间步根据解码器的前一个状态以及经过attention加权后的encoder输出进行解码
         for t in range(int(max(decode_lengths))):
-            #decode_lengths是解码长度降序的排列,batch_size_t求出当前时间步中需要进行解码的数量
+            # decode_lengths是解码长度降序的排列,batch_size_t求出当前时间步中需要进行解码的数量
             batch_size_t = sum([l > t for l in decode_lengths])
-            attention_weighted_encoding, alpha = self.attention(encoder_out[:batch_size_t],
-                                                                h[:batch_size_t])
-            gate = self.sigmoid(self.f_beta(h[:batch_size_t]))  # gating scalar, (batch_size_t, encoder_dim)
+            attention_weighted_encoding, alpha = self.attention(
+                encoder_out[:batch_size_t], h[:batch_size_t]
+            )
+            gate = self.sigmoid(
+                self.f_beta(h[:batch_size_t])
+            )  # gating scalar, (batch_size_t, encoder_dim)
             attention_weighted_encoding = gate * attention_weighted_encoding
             # h, c = self.decode_step(
             #     torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1),
             #     (h[:batch_size_t], c[:batch_size_t]))  # (batch_size_t, decoder_dim)
-            #teahcer forcing
-            if t==1 or (np.random.rand() < self.p) :
+            # teahcer forcing
+            if t == 1 or (np.random.rand() < self.p):
                 h = self.decode_step(
-                    torch.cat([embeddings[:batch_size_t, t, :], attention_weighted_encoding], dim=1),
-                    h[:batch_size_t])  # (batch_size_t, decoder_dim)
+                    torch.cat(
+                        [embeddings[:batch_size_t, t, :], attention_weighted_encoding],
+                        dim=1,
+                    ),
+                    h[:batch_size_t],
+                )  # (batch_size_t, decoder_dim)
             else:
                 h = self.decode_step(
-                    torch.cat([self.embedding(torch.argmax(predictions[:batch_size_t, t, :],dim = 1)), attention_weighted_encoding], dim=1),
-                    h[:batch_size_t])  # (batch_size_t, decoder_dim)
+                    torch.cat(
+                        [
+                            self.embedding(
+                                torch.argmax(predictions[:batch_size_t, t, :], dim=1)
+                            ),
+                            attention_weighted_encoding,
+                        ],
+                        dim=1,
+                    ),
+                    h[:batch_size_t],
+                )  # (batch_size_t, decoder_dim)
             preds = self.fc(self.dropout(h))  # (batch_size_t, vocab_size)
             predictions[:batch_size_t, t, :] = preds
             alphas[:batch_size_t, t, :] = alpha

@@ -7,7 +7,7 @@ from torch import nn
 from tqdm import tqdm
 from torch.nn.utils.rnn import pack_padded_sequence
 from model.utils import *
-from model import metrics,dataloader,model
+from model import metrics, dataloader, model
 from torch.utils.checkpoint import checkpoint as train_ck
 from torch.utils.data import DataLoader
 
@@ -16,12 +16,11 @@ from model.dataloader import MyDataset
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-
 model.device = device
-'''
+"""
 如果网络的输入数据维度或类型上变化不大，设置  torch.backends.cudnn.benchmark = true  可以增加运行效率；
 如果网络的输入数据在每次 iteration 都变化的话，会导致 cnDNN 每次都会去寻找一遍最优配置，这样反而会降低运行效率。
-'''
+"""
 # cudnn.benchmark = True
 
 
@@ -44,27 +43,33 @@ def main():
 
     # Initialize / load checkpoint
     if checkpoint is None:
-        decoder = model.DecoderWithAttention(attention_dim=attention_dim,
-                                       embed_dim=emb_dim,
-                                       decoder_dim=decoder_dim,
-                                       vocab_size=len(word_map),
-                                       dropout=dropout)
-        decoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, decoder.parameters()),
-                                             lr=decoder_lr)
+        decoder = model.DecoderWithAttention(
+            attention_dim=attention_dim,
+            embed_dim=emb_dim,
+            decoder_dim=decoder_dim,
+            vocab_size=len(word_map),
+            dropout=dropout,
+        )
+        decoder_optimizer = torch.optim.Adam(
+            params=filter(lambda p: p.requires_grad, decoder.parameters()),
+            lr=decoder_lr,
+        )
         encoder = model.Encoder()
         # encoder_optimizer = None
-        encoder_optimizer = torch.optim.Adam(params=filter(lambda p: p.requires_grad, encoder.parameters()),
-                                             lr=encoder_lr)
+        encoder_optimizer = torch.optim.Adam(
+            params=filter(lambda p: p.requires_grad, encoder.parameters()),
+            lr=encoder_lr,
+        )
 
     else:
         checkpoint = torch.load(checkpoint)
-        start_epoch = checkpoint['epoch'] + 1
-        epochs_since_improvement = checkpoint['epochs_since_improvement']
-        best_score = checkpoint['score']
-        decoder = checkpoint['decoder']
-        encoder_optimizer = checkpoint['encoder_optimizer']
-        decoder_optimizer = checkpoint['decoder_optimizer']
-        encoder = checkpoint['encoder']
+        start_epoch = checkpoint["epoch"] + 1
+        epochs_since_improvement = checkpoint["epochs_since_improvement"]
+        best_score = checkpoint["score"]
+        decoder = checkpoint["decoder"]
+        encoder_optimizer = checkpoint["encoder_optimizer"]
+        decoder_optimizer = checkpoint["decoder_optimizer"]
+        encoder = checkpoint["encoder"]
         # encoder_optimizer = checkpoint['encoder_optimizer']
         # encoder_optimizer = None
         # if fine_tune_encoder is True and encoder_optimizer is None:
@@ -88,27 +93,27 @@ def main():
     eval_dataset = MyDataset(dataset_dir, is_train=False)
 
     train_loader = DataLoader(
-        train_dataset, 
+        train_dataset,
         batch_size=batch_size,
         collate_fn=collate_fn_MyDataset,
-        num_workers=0
+        num_workers=0,
     )
     val_loader = DataLoader(
-        eval_dataset, 
+        eval_dataset,
         batch_size=batch_size,
         collate_fn=collate_fn_MyDataset,
-        num_workers=0
+        num_workers=0,
     )
 
     # #统计验证集的词频
     # words_freq = cal_word_freq(word_map,val_loader)
     # print(words_freq)
-    p = 1#teacher forcing概率
+    p = 1  # teacher forcing概率
     # Epochs
     for epoch in tqdm(range(start_epoch, epochs)):
-        #每2个epoch衰减一次teahcer forcing的概率
+        # 每2个epoch衰减一次teahcer forcing的概率
         if p > 0.05:
-            if (epoch % 3 == 0 and epoch != 0):
+            if epoch % 3 == 0 and epoch != 0:
                 p *= 0.75
         else:
             p = 0
@@ -119,44 +124,69 @@ def main():
         if epochs_since_improvement > 0 and epochs_since_improvement % 2 == 0:
             adjust_learning_rate(decoder_optimizer, 0.7)
             adjust_learning_rate(encoder_optimizer, 0.8)
-        #动态学习率调节
-        # torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.8, 
+        # 动态学习率调节
+        # torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, mode='max', factor=0.8,
         #     patience=4, verbose=True, threshold=0.0001, threshold_mode='rel', cooldown=0, min_lr=1e-6, eps=1e-8)
 
         # One epoch's training
-        train(train_loader=train_loader,
-              encoder=encoder,
-              decoder=decoder,
-              criterion=criterion,
-              encoder_optimizer=decoder_optimizer,
-              decoder_optimizer=decoder_optimizer,
-              epoch=epoch,p=p)#encoder_optimizer=encoder_optimizer,
+        train(
+            train_loader=train_loader,
+            encoder=encoder,
+            decoder=decoder,
+            criterion=criterion,
+            encoder_optimizer=decoder_optimizer,
+            decoder_optimizer=decoder_optimizer,
+            epoch=epoch,
+            p=p,
+        )  # encoder_optimizer=encoder_optimizer,
 
         # One epoch's validation
-        recent_score = validate(val_loader=val_loader,
-                                encoder=encoder,
-                                decoder=decoder,
-                                criterion=criterion)
-        if (p==0):
-            print('Stop teacher forcing!')
+        recent_score = validate(
+            val_loader=val_loader, encoder=encoder, decoder=decoder, criterion=criterion
+        )
+        if p == 0:
+            print("Stop teacher forcing!")
             # Check if there was an improvement
             is_best = recent_score > best_score
             best_score = max(recent_score, best_score)
             if not is_best:
                 epochs_since_improvement += 1
-                print("\nEpochs since last improvement: %d\n" % (epochs_since_improvement,))
+                print(
+                    "\nEpochs since last improvement: %d\n"
+                    % (epochs_since_improvement,)
+                )
             else:
-                print('New Best Score!(%d)'%(best_score,))
+                print("New Best Score!(%d)" % (best_score,))
                 epochs_since_improvement = 0
 
             if epoch % save_freq == 0:
-                print('Saveing...')
-                save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder,encoder_optimizer,
-                            decoder_optimizer, recent_score, is_best)
-        print('--------------------------------------------------------------------------')
+                print("Saveing...")
+                save_checkpoint(
+                    data_name,
+                    epoch,
+                    epochs_since_improvement,
+                    encoder,
+                    decoder,
+                    encoder_optimizer,
+                    decoder_optimizer,
+                    recent_score,
+                    is_best,
+                )
+        print(
+            "--------------------------------------------------------------------------"
+        )
 
 
-def train(train_loader, encoder, decoder, criterion, encoder_optimizer,decoder_optimizer, epoch, p):
+def train(
+    train_loader,
+    encoder,
+    decoder,
+    criterion,
+    encoder_optimizer,
+    decoder_optimizer,
+    epoch,
+    p,
+):
     """
     Performs one epoch's training.
     :param train_loader: 训练集的dataloader
@@ -182,8 +212,10 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer,decoder_o
             try:
                 imgs = encoder(imgs)
             except:
-                imgs = train_ck(encoder,imgs)
-            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, p=p)
+                imgs = train_ck(encoder, imgs)
+            scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(
+                imgs, caps, caplens, p=p
+            )
 
             # 由于加入开始符<start>以及停止符<end>,caption从第二位开始,知道结束符
             targets = caps_sorted[:, 1:]
@@ -192,15 +224,19 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer,decoder_o
             # pack_padded_sequence is an easy trick to do this
             # scores, _ = pack_padded_sequence(scores, decode_lengths, batch_first=True)
             # targets, _ = pack_padded_sequence(targets, decode_lengths, batch_first=True)
-            scores = pack_padded_sequence(scores, decode_lengths.cpu().int(), batch_first=True).data
-            targets = pack_padded_sequence(targets, decode_lengths.cpu().int(), batch_first=True).data
+            scores = pack_padded_sequence(
+                scores, decode_lengths.cpu().int(), batch_first=True
+            ).data
+            targets = pack_padded_sequence(
+                targets, decode_lengths.cpu().int(), batch_first=True
+            ).data
 
             # Calculate loss
             scores = scores.to(device)
             loss = criterion(scores, targets)
 
             # 加入 doubly stochastic attention 正则化
-            loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
+            loss += alpha_c * ((1.0 - alphas.sum(dim=1)) ** 2).mean()
 
             # 反向传播
             encoder_optimizer.zero_grad()
@@ -222,7 +258,7 @@ def train(train_loader, encoder, decoder, criterion, encoder_optimizer,decoder_o
             it.set_postfix(
                 Loss=f"{loss:.2e}",
             )
-            
+
             # if i % save_freq == 0:
             #     save_checkpoint(data_name, epoch, epochs_since_improvement, encoder, decoder,encoder_optimizer,
             #                 decoder_optimizer, 0,0)
@@ -264,7 +300,9 @@ def validate(val_loader, encoder, decoder, criterion):
                 # Forward prop.
                 if encoder is not None:
                     imgs = encoder(imgs)
-                scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(imgs, caps, caplens, p=0)
+                scores, caps_sorted, decode_lengths, alphas, sort_ind = decoder(
+                    imgs, caps, caplens, p=0
+                )
 
                 # Since we decoded starting with <start>, the targets are all words after <start>, up to <end>
                 targets = caps_sorted[:, 1:]
@@ -272,14 +310,18 @@ def validate(val_loader, encoder, decoder, criterion):
                 # Remove timesteps that we didn't decode at, or are pads
                 # pack_padded_sequence is an easy trick to do this
                 scores_copy = scores.clone()
-                scores = pack_padded_sequence(scores, decode_lengths, batch_first=True).data
-                targets = pack_padded_sequence(targets, decode_lengths, batch_first=True).data
+                scores = pack_padded_sequence(
+                    scores, decode_lengths, batch_first=True
+                ).data
+                targets = pack_padded_sequence(
+                    targets, decode_lengths, batch_first=True
+                ).data
 
                 # Calculate loss
                 loss = criterion(scores, targets)
 
                 # Add doubly stochastic attention regularization
-                loss += alpha_c * ((1. - alphas.sum(dim=1)) ** 2).mean()
+                loss += alpha_c * ((1.0 - alphas.sum(dim=1)) ** 2).mean()
 
                 # Keep track of metrics
                 losses.update(loss.item(), sum(decode_lengths))
@@ -308,14 +350,14 @@ def validate(val_loader, encoder, decoder, criterion):
                 caplens = caplens[sort_ind]
                 caps = caps[sort_ind]
                 for i in range(len(caplens)):
-                    references.append(caps[i][1:caplens[i]].tolist())
+                    references.append(caps[i][1 : caplens[i]].tolist())
                 # Hypotheses
                 # 这里直接使用greedy模式进行评价,在推断中一般使用集束搜索模式
                 _, preds = torch.max(scores_copy, dim=2)
                 preds = preds.tolist()
                 temp_preds = list()
                 for j, p in enumerate(preds):
-                    temp_preds.append(preds[j][:decode_lengths[j]])  # remove pads
+                    temp_preds.append(preds[j][: decode_lengths[j]])  # remove pads
                 preds = temp_preds
                 hypotheses.extend(preds)
 
@@ -325,5 +367,5 @@ def validate(val_loader, encoder, decoder, criterion):
     return Score
 
 
-if __name__ == '__main__':
+if __name__ == "__main__":
     main()
